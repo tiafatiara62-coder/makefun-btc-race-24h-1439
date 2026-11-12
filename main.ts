@@ -15,7 +15,7 @@
 //
 //   1. Trend leg (one-shot): buy once, only when the close is above its
 //      24-bar EMA and the 60-minute return is at least +0.50%. It fires
-//      once, early in a rising window, and rides it with a 0.50% trailing
+//      once, early in a rising window, and rides it with a 0.35% trailing
 //      stop from the peak position value. It never re-enters, so a flat or
 //      falling window leaves it in cash instead of churning.
 //   2. Dip leg: buy when the close is at least 1.10% below the close 45
@@ -24,11 +24,11 @@
 //      the next leg down and loses.
 //
 // A full-size round trip costs ~26 bps in fees, slippage and impact, so the
-// 0.40% dip target and the 0.50% trailing stop are sized just above that cost
+// 0.40% dip target and the 0.35% trailing stop are sized just above that cost
 // while staying small enough to fire in a choppy market. On the dev window
-// this bot makes three round trips (trend + two dips) for +$7.06, 6 fills,
-// 1.1% max drawdown, and it is positive in both halves of the window
-// (+$4.39 first 12h, +$2.67 second 12h). The dev result is not a prediction
+// this bot makes three round trips (trend + two dips) for +$8.42, 6 fills,
+// 0.74% max drawdown, and it is positive in both halves of the window
+// (+$5.56 first 12h, +$2.67 second 12h). The dev result is not a prediction
 // for the unseen race window; it is only the gate the entry must clear.
 
 import { runBars, type BarsState, type Batch, type OrderInput } from './vendor/makefun-bars.ts';
@@ -37,7 +37,7 @@ import { runBars, type BarsState, type Batch, type OrderInput } from './vendor/m
 const TREND_WIN = 60; // trailing window (bars) for the uptrend trigger
 const TREND_MIN_BPS = 50; // enter when the 60-minute return is >= +0.50%
 const TREND_EMA_SPAN = 24; // ... and the close sits above this EMA
-const TRAIL_BPS = 50; // trend exit: 0.50% trailing stop from the peak value
+const TRAIL_BPS = 35; // trend exit: 0.35% trailing stop from the peak value
 const DIP_WIN = 45; // trailing window (bars) for the drop that triggers a dip-buy
 const DIP_BPS = 110; // enter when the close is >= 1.10% below the close 45 bars ago
 const DIP_TP_BPS = 40; // dip exit: +0.40% over cost
