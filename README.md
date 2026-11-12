@@ -1,4 +1,4 @@
-# BTC race bot — one-shot trend + dip bounce (btc-race-24h-20261112-1439)
+# BTC race bot — trend + deep dip + shallow rebound (btc-race-24h-20261112-1439)
 
 Entry for make.fun's "Race a BTC trading bot live for 24 hours"
 (`btc-race-24h-20261112-1439`). Long-only bot trading cbBTC/USDC on
@@ -17,9 +17,17 @@ Two small, fast pieces, tuned on the competition's dev window
    Rides the rise with a 0.35% trailing stop from the peak position
    value. It never re-enters, so a flat or falling window leaves it in
    cash.
-2. **Dip leg:** buy when the close is at least 1.30% below the close
-   60 minutes ago; sell the bounce at +0.70% over cost (or -1.00%
+2. **Deep-dip leg:** buy when the close is at least 1.30% below the
+   close 60 minutes ago; sell the bounce at +0.70% over cost (or -1.00%
    under it).
+3. **Shallow rebound leg:** buy when the close is at least 0.70% below
+   the close 55 minutes ago AND has already bounced at least 0.20%
+   over the last 10 minutes; sell at +0.80% over cost (or -0.75% under
+   it). The bounce gate keeps it out of a falling knife: without it the
+   leg buys into the drop, and with a looser gate it fires in the second
+   half of the new window's grind-down and loses there. With the +0.20%
+   gate it never fires on the new window, but on the old window it
+   catches the strong mid-morning rebound for +$9.69.
 
 A full-size round trip costs ~26 bps in fees, slippage and impact, so
 the 0.70% dip target and the 0.35% trailing stop are sized just above
@@ -30,12 +38,54 @@ that cost while staying small enough to fire in a choppy market.
 | window | net PnL | fills | fees | max drawdown |
 |---|---|---|---|---|
 | this race's dev (11–12 Nov, BTC -2.30%) | **+$8.20** (+0.82%) | 4 | $1.61 | 0.62% |
-| previous race's dev (10–11 Nov, BTC -1.07%) | **+$5.69** (+0.57%) | 2 | $0.80 | 1.00% |
+| previous race's dev (10–11 Nov, BTC -1.07%) | **+$15.42** (+1.54%) | 4 | $1.61 | 1.00% |
 
-Two round trips on the new window (trend + one dip) and one round trip
-on the old window (one dip). See `BUILD_LOG.md` in the
+Two round trips on each window (new: trend + one deep dip; old: one
+shallow rebound + one deep dip). See `BUILD_LOG.md` in the
 build workspace for the full sweep (5,000+ parameter sets tested across
 both windows) and the runner-ups that were rejected.
+
+## Revision 3: shallow rebound leg with bounce gate
+
+The two-window version (+$8.20 new / +$5.69 old) left the whole
+old-window profit on a single deep-dip trade. A sweep of a second dip
+leg (216 combos, then a 576-combo refinement) found a shallow rebound
+shape that adds a second old-window trade without touching the new
+window at all:
+
+- **New leg:** 55-minute window, drop >= 0.70%, bounce gate +0.20%
+  over 10 minutes, TP +0.80% / SL -0.75%. It buys the old window's
+  mid-morning rebound (bars ~369–421, +$9.69) and never fires on the
+  new window, where the same gate stays shut.
+- The gate is the leg: with a looser bounce gate (+0.10–0.15%) the leg
+  fires in the new window's second-half grind-down and loses -$11 to
+  -$13 there; with a stricter gate (+0.30%) it never fires on either
+  window. A late-window dip leg (H2 only, 120–180-minute window) was
+  also tested and loses -$8.76 to -$12.05 on the new window — the
+  second half there is a slow bleed with at most +42 bp of bounce, so
+  no dip leg can trade it profitably; the bot stays flat there.
+
+Official grade-local (process driver), both kits:
+
+| window | net PnL | fills | fees | max drawdown |
+|---|---|---|---|---|
+| this race's dev (11–12 Nov) | **+$8.20** | 4 | $1.61 | 0.62% |
+| previous race's dev (10–11 Nov) | **+$15.42** | 4 | $1.61 | 1.00% |
+
+Min $8.20 / sum $23.62, up from $5.69 / $13.89 — the min is now set by
+the new window instead of the old one. The numbers come from a
+plateau, not a knife edge: the shallow leg's fine grid (dip window
+50–60, drop 60–75 bp, take-profit 70–90 bp, bounce gate +0.18–0.22%
+over 10 minutes) keeps the old window at $12.80–$15.42 in 33 of 108
+points, and the trailing-stop hill (25–45 bp) is smooth with 35 bp in
+the middle of its flat top (the 30 bp peak, +$8.98, was not taken:
+it is one trend trade's exit timing, and the middle of the hill is the
+more robust choice).
+
+Best rejected variant: the same shallow leg with a 30 bp trailing
+stop — min $8.98, sum $24.40. Rejected because the extra $0.78 is one
+trend trade's exit on the new window; the chosen 35 bp keeps the
+robust middle of the trail hill.
 
 ## Revision 2: two-window robustness (early trend cap + deeper dip)
 
