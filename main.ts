@@ -1,35 +1,47 @@
-// One-shot uptrend ride + sharp-dip bounce bot for btc-race-24h-20261112-1439.
+// One-shot early uptrend + deep-dip bounce bot for btc-race-24h-20261112-1439.
 // Long only, one position, full size. Every decision is a pure function of the
 // closes seen so far: no clock, no environment, no Math.random, so two runs on
 // the same data produce identical orders.
 //
-// Why this shape: the dev window (24h of 1-minute cbBTC bars, 2026-11-11
-// 14:39 -> 2026-11-12 14:39 UTC, BTC -2.30% with a +1.08% rise in the first
-// four hours, then a slow grind down and a -1.95% sell-off in the last four)
-// punishes the usual families. Canonical RSI+Bollinger mean reversion loses
-// -$46.52 there (19 trades: the dips keep dipping), plain RSI(14) loses
-// -$48.21, EMA-cross 8/21 loses -$95.88, and the previous race's dip-buy
-// (0.90% over 90 min, TP/SL 1.00%) loses -$25.17. What survives is two small,
-// fast pieces, each tuned on this window over a plateau of nearby parameters
-// (see BUILD_LOG.md), never a single knife-edge set:
+// Why this shape: the previous version of this bot (+$8.42 on this race's dev
+// window) loses -$16.29 on the previous race's dev window (2026-11-10 08:01
+// -> 2026-11-11 08:01 UTC, BTC -1.07%): both of its dip trades hit their
+// stop, and its trend trade trailed out inside a down day. Every candidate
+// tested before this one was one-sided in the same way — the race-1 dip-buy
+// (+$20.80 on the old window) loses -$25.17 on the new one, and the
+// "buy at the open" trick (+$5.59 new) loses -$9.77 old. The race window
+// (20:54 UTC 12 Nov -> 20:54 UTC 13 Nov) is unseen, so this version is tuned
+// to be profitable on BOTH dev windows instead of maximising one:
 //
-//   1. Trend leg (one-shot): buy once, only when the close is above its
-//      24-bar EMA and the 60-minute return is at least +0.50%. It fires
-//      once, early in a rising window, and rides it with a 0.35% trailing
-//      stop from the peak position value. It never re-enters, so a flat or
-//      falling window leaves it in cash instead of churning.
-//   2. Dip leg: buy when the close is at least 1.10% below the close 45
-//      minutes ago, and sell the bounce at +0.40% over cost (or -0.75%
-//      under it). The bounce here is fast: a wider take-profit holds into
-//      the next leg down and loses.
+//   1. Trend leg (one-shot, opening hours only): buy once, only while the
+//      bar index is below 240 (the first four hours of the window), when
+//      the close is above its 24-bar EMA and the 60-minute return is at
+//      least +0.50%. It rides the rise with a 0.35% trailing stop from the
+//      peak position value and never re-enters. In both observed windows
+//      the only profitable trend signal is the opening rise; a mid-window
+//      trend signal is a rebound inside a down day and trails out at a
+//      loss, so the leg is not allowed to fire after the opening hours.
+//   2. Dip leg: buy when the close is at least 1.30% below the close 60
+//      minutes ago, and sell the bounce at +0.70% over cost (or -1.00%
+//      under it). The deeper, slower dip with a wider take-profit and a
+//      wider stop survives the noise long enough to bank the rebound on
+//      both windows: on the old window the previous 45-minute/1.10% dip
+//      with a 0.75% stop was stopped out before the rebound both times,
+//      while this shape holds through to +0.70%.
 //
 // A full-size round trip costs ~26 bps in fees, slippage and impact, so the
-// 0.40% dip target and the 0.35% trailing stop are sized just above that cost
-// while staying small enough to fire in a choppy market. On the dev window
-// this bot makes three round trips (trend + two dips) for +$8.42, 6 fills,
-// 0.74% max drawdown, and it is positive in both halves of the window
-// (+$5.56 first 12h, +$2.67 second 12h). The dev result is not a prediction
-// for the unseen race window; it is only the gate the entry must clear.
+// 0.70% dip target and the 0.35% trailing stop sit above that cost while
+// staying small enough to fire in a choppy market. On the two dev windows
+// this bot makes +$8.20 (new window, 4 fills, 0.62% max drawdown) and
+// +$5.69 (old window, 2 fills, 1.00% max drawdown). The numbers come from a
+// plateau, not a single knife-edge set: the fine grid around the chosen
+// parameters (dip window 55–75, drop 125–135 bp, take-profit 65–75 bp) is
+// positive on both windows in 38 of 45 points, the trailing-stop hill
+// (25–45 bp) is smooth with 35 bp in the middle of its flat top, and the
+// early-trend cap gives identical results for any cap between 120 and 360
+// bars. The dev results are still not a prediction for the unseen race
+// window; they are only the gate the entry must clear, now on two windows
+// instead of one.
 
 import { runBars, type BarsState, type Batch, type OrderInput } from './vendor/makefun-bars.ts';
 
@@ -38,10 +50,11 @@ const TREND_WIN = 60; // trailing window (bars) for the uptrend trigger
 const TREND_MIN_BPS = 50; // enter when the 60-minute return is >= +0.50%
 const TREND_EMA_SPAN = 24; // ... and the close sits above this EMA
 const TRAIL_BPS = 35; // trend exit: 0.35% trailing stop from the peak value
-const DIP_WIN = 45; // trailing window (bars) for the drop that triggers a dip-buy
-const DIP_BPS = 110; // enter when the close is >= 1.10% below the close 45 bars ago
-const DIP_TP_BPS = 40; // dip exit: +0.40% over cost
-const DIP_SL_BPS = 75; // dip exit: -0.75% under cost
+const TREND_EARLY_CAP = 240; // trend leg fires only while bar index < 240
+const DIP_WIN = 60; // trailing window (bars) for the drop that triggers a dip-buy
+const DIP_BPS = 130; // enter when the close is >= 1.30% below the close 60 bars ago
+const DIP_TP_BPS = 70; // dip exit: +0.70% over cost
+const DIP_SL_BPS = 100; // dip exit: -1.00% under cost
 const MAX_SLIPPAGE_BPS = 100; // a fill may be at most 1.00% from the latest close
 
 type Mode = 'trend' | 'dip' | null;
@@ -87,6 +100,7 @@ await runBars({
     closes.push(close);
     const ema = emaStep(emaFast, TREND_EMA_SPAN, Number(bar.c));
     const minNotional = BigInt(state.hello.fees.min_notional_quote_units);
+    const barIndex = closes.length - 1; // 0-based index of this bar
 
     const pos = state.positions.get(sym);
     if (pos !== undefined && pos.qty > 0n) {
@@ -117,7 +131,7 @@ await runBars({
     const n = closes.length;
     if (n > DIP_WIN) {
       const ago = closes[n - 1 - DIP_WIN];
-      // close <= ago * (1 - 1.10%): close * 10000 <= ago * 9890
+      // close <= ago * (1 - 1.30%): close * 10000 <= ago * 9870
       if (close * 10000n <= ago * BigInt(10000 - DIP_BPS)) {
         const amount = state.cash < state.weightRoom(sym) ? state.cash : state.weightRoom(sym);
         if (amount >= minNotional) {
@@ -129,9 +143,10 @@ await runBars({
       }
     }
 
-    // One-shot trend leg: a genuine early rise — 60-minute return at least
-    // +0.50% with the close above its 24-bar EMA. Fires at most once.
-    if (!trendUsed && n > TREND_WIN && ema !== null) {
+    // One-shot trend leg, opening hours only: a genuine early rise —
+    // 60-minute return at least +0.50% with the close above its 24-bar
+    // EMA, while the bar index is below 240. Fires at most once.
+    if (!trendUsed && barIndex < TREND_EARLY_CAP && n > TREND_WIN && ema !== null) {
       const ago = closes[n - 1 - TREND_WIN];
       const rising = close * 10000n >= ago * BigInt(10000 + TREND_MIN_BPS);
       const aboveEma = Number(close) > ema;
