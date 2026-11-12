@@ -14,11 +14,15 @@
 //   1. Trend leg (one-shot, opening hours only): buy once, only while the
 //      bar index is below 240 (the first four hours of the window), when
 //      the close is above its 24-bar EMA and the 60-minute return is at
-//      least +0.50%. It rides the rise with a 0.35% trailing stop from the
-//      peak position value and never re-enters. In both observed windows
-//      the only profitable trend signal is the opening rise; a mid-window
-//      trend signal is a rebound inside a down day and trails out at a
-//      loss, so the leg is not allowed to fire after the opening hours.
+//      least +0.50%. It takes profit at +0.50% over cost and never
+//      re-enters, and there is deliberately no stop-loss on this leg:
+//      the audit (round 2, R1) showed any stop tight enough to matter
+//      (<= -1.50%) fires on exactly the two trend trades that later
+//      recover, while a looser stop (>= -2.00%) is identical to no stop
+//      on all seven test windows. In both observed windows the only
+//      profitable trend signal is the opening rise; a mid-window trend
+//      signal is a rebound inside a down day, so the leg is not allowed
+//      to fire after the opening hours.
 //   2. Deep-dip leg: buy when the close is at least 1.30% below the close
 //      60 minutes ago, and sell the bounce at +0.70% over cost (or -1.00%
 //      under it). The deeper, slower dip with a wider take-profit and a
@@ -44,15 +48,16 @@
 // this family; the bot stays flat there rather than bleed.
 //
 // A full-size round trip costs ~26 bps in fees, slippage and impact, so
-// the 0.70–0.80% dip targets and the 0.35% trailing stop sit above that
-// cost while staying small enough to fire in a choppy market. On the two
-// dev windows this bot makes +$8.20 (new window, 4 fills, 0.62% max
+// the 0.70–0.80% dip targets and the +0.50% trend take-profit sit above
+// that cost while staying small enough to fire in a choppy market. On the
+// two dev windows this bot makes +$12.11 (new window, 4 fills, 0.34% max
 // drawdown) and +$15.42 (old window, 4 fills, 1.00% max drawdown). The
 // numbers come from a plateau, not a single knife-edge set: the shallow
 // leg's fine grid (dip window 50–60, drop 60–75 bp, take-profit 70–90 bp,
 // bounce gate +0.18–0.22% over 10 minutes) keeps the old window at
-// $12.80–$15.42 in 33 of 108 points, the trailing-stop hill (25–45 bp)
-// is smooth with 35 bp in the middle of its flat top, and the
+// $12.80–$15.42 in 33 of 108 points, the trend take-profit variant
+// weakly dominates the old trailing-stop version on all seven test
+// windows (min -$1.68, sum +$43.40 vs -$5.78 / +$22.84), and the
 // early-trend cap gives identical results for any cap between 120 and
 // 360 bars. The dev results are still not a prediction for the unseen
 // race window; they are only the gate the entry must clear, now on two
@@ -64,7 +69,7 @@ import { runBars, type BarsState, type Batch, type OrderInput } from './vendor/m
 const TREND_WIN = 60; // trailing window (bars) for the uptrend trigger
 const TREND_MIN_BPS = 50; // enter when the 60-minute return is >= +0.50%
 const TREND_EMA_SPAN = 24; // ... and the close sits above this EMA
-const TRAIL_BPS = 35; // trend exit: 0.35% trailing stop from the peak value
+const TREND_TP_BPS = 50; // trend exit: take-profit +0.50% over cost, no stop-loss
 const TREND_EARLY_CAP = 240; // trend leg fires only while bar index < 240
 const DIP_WIN = 60; // trailing window (bars) for the drop that triggers a dip-buy
 const DIP_BPS = 130; // enter when the close is >= 1.30% below the close 60 bars ago
@@ -127,9 +132,14 @@ await runBars({
     if (pos !== undefined && pos.qty > 0n) {
       const val = state.value(sym, pos.qty);
       if (mode === 'trend') {
-        if (peak === null || val > peak) peak = val;
-        // Trailing stop from the peak position value.
-        if (peak !== null && val * 10000n <= peak * BigInt(10000 - TRAIL_BPS)) {
+        // Hard take-profit on cost: sell once the position value is at
+        // least +0.50% over cost. There is deliberately NO stop-loss on
+        // this leg — the audit showed any stop tight enough to matter
+        // (<= -1.50%) fires on exactly the trades that later recover,
+        // while a looser stop (>= -2.00%) is identical to no stop on all
+        // seven test windows. If the target is never reached the position
+        // is held to the window's end flatten.
+        if (val * 10000n >= pos.cost * BigInt(10000 + TREND_TP_BPS)) {
           mode = null;
           peak = null;
           return [{ side: 'sell', symbol: sym, qty: pos.qty, max_slippage_bps: MAX_SLIPPAGE_BPS }];
